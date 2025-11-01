@@ -12,18 +12,42 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
   console.error('⚠️  WARNING: Google OAuth credentials not set in environment variables');
 }
 
-const callbackURL = process.env.CALLBACK_URL || `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+// Determine callback URL based on environment
+// In production (Render), use RENDER_EXTERNAL_URL or construct from available env vars
+// In development, use localhost
+let callbackURL;
+if (process.env.CALLBACK_URL) {
+  callbackURL = process.env.CALLBACK_URL;
+} else if (process.env.NODE_ENV === 'production') {
+  // For Render deployment - Render sets RENDER_EXTERNAL_URL automatically
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || 
+                  process.env.RENDER_URL || 
+                  process.env.BACKEND_URL || 
+                  (process.env.RENDER_SERVICE_NAME ? `https://${process.env.RENDER_SERVICE_NAME}.onrender.com` : null);
+  
+  if (!baseUrl) {
+    console.error('⚠️  WARNING: Could not determine production URL. Set CALLBACK_URL environment variable.');
+    callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+  } else {
+    callbackURL = `${baseUrl}/api/auth/google/callback`;
+  }
+} else {
+  // Development
+  callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+}
+
 console.log('🔧 OAuth Configuration:');
 console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID ? '✓ Set' : '✗ Missing');
 console.log('   Client Secret:', process.env.GOOGLE_CLIENT_SECRET ? '✓ Set' : '✗ Missing');
 console.log('   Callback URL:', callbackURL);
+console.log('   Environment:', process.env.NODE_ENV || 'development');
 
 // Configure Google OAuth Strategy
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   callbackURL: callbackURL,
-  proxy: false // Set to true only if behind a proxy in production
+  proxy: process.env.NODE_ENV === 'production' // Enable proxy in production (for Render/Heroku)
 }, async (accessToken, refreshToken, profile, done) => {
   try {
     // Log successful token exchange
@@ -146,20 +170,32 @@ router.get('/google/callback',
       errorDescription: req.query.error_description
     });
     
+    // Determine correct client URL - always use 3001 for local dev, not 3000 (other project)
+    const getClientUrl = () => {
+      // In production, use CLIENT_URL if set
+      if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
+        return process.env.CLIENT_URL;
+      }
+      // For local development, ALWAYS use port 3001 (Weather Analytics project)
+      return 'http://localhost:3001';
+    };
+    
     // Check for OAuth error in query parameters
     if (req.query.error) {
       console.error('❌ OAuth error from Google:', {
         error: req.query.error,
         description: req.query.error_description
       });
-      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+      const clientUrl = getClientUrl();
+      console.log(`🔀 Redirecting to: ${clientUrl}/login`);
       return res.redirect(`${clientUrl}/login?error=${req.query.error}&description=${encodeURIComponent(req.query.error_description || '')}`);
     }
     
     // Check if authorization code is missing
     if (!req.query.code) {
       console.error('❌ Missing authorization code in callback');
-      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+      const clientUrl = getClientUrl();
+      console.log(`🔀 Redirecting to: ${clientUrl}/login`);
       return res.redirect(`${clientUrl}/login?error=no_code`);
     }
     
@@ -170,7 +206,15 @@ router.get('/google/callback',
     passport.authenticate('google', { 
       session: false,
       failureFlash: false
-    }, (err, user, info) => {
+    },       (err, user, info) => {
+      // Determine correct client URL - always use 3001 for local dev
+      const getClientUrl = () => {
+        if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
+          return process.env.CLIENT_URL;
+        }
+        return 'http://localhost:3001'; // Always use 3001 for Weather Analytics
+      };
+      
       if (err) {
         console.error('❌ Passport authentication error:', err);
         console.error('   Error message:', err.message);
@@ -209,13 +253,15 @@ router.get('/google/callback',
           }
         }
         
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+        const clientUrl = getClientUrl();
+        console.log(`🔀 Redirecting to: ${clientUrl}/login (OAuth failed)`);
         return res.redirect(`${clientUrl}/login?error=oauth_failed&message=${encodeURIComponent(err.message || 'Authentication failed')}`);
       }
       
       if (!user) {
         console.error('❌ No user returned from OAuth strategy');
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+        const clientUrl = getClientUrl();
+        console.log(`🔀 Redirecting to: ${clientUrl}/login (no user)`);
         return res.redirect(`${clientUrl}/login?error=no_user`);
       }
       
@@ -225,10 +271,19 @@ router.get('/google/callback',
     })(req, res, next);
   },
   async (req, res) => {
+    // Determine correct client URL - always use 3001 for local dev
+    const getClientUrl = () => {
+      if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
+        return process.env.CLIENT_URL;
+      }
+      return 'http://localhost:3001'; // Always use 3001 for Weather Analytics
+    };
+    
     try {
       if (!req.user || !req.user._id) {
         console.error('OAuth callback: No user in request');
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+        const clientUrl = getClientUrl();
+        console.log(`🔀 Redirecting to: ${clientUrl}/login (no user in callback)`);
         return res.redirect(`${clientUrl}/login?error=no_user`);
       }
 
@@ -261,14 +316,16 @@ router.get('/google/callback',
 
       res.cookie('token', token, cookieOptions);
 
-      // Redirect to dashboard
-      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+      // Redirect to dashboard - ALWAYS use port 3001 for Weather Analytics
+      const clientUrl = getClientUrl();
+      console.log(`✅ OAuth successful! Redirecting to: ${clientUrl}/dashboard`);
       res.redirect(`${clientUrl}/dashboard`);
     } catch (error) {
       console.error('OAuth callback error:', error);
       console.error('Error stack:', error.stack);
       
-      const clientUrl = process.env.CLIENT_URL || 'http://localhost:3001';
+      const clientUrl = getClientUrl();
+      console.log(`🔀 Redirecting to: ${clientUrl}/login (callback error)`);
       // Redirect with error query parameter for debugging
       res.redirect(`${clientUrl}/login?error=auth_failed`);
     }

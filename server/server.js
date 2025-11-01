@@ -23,9 +23,11 @@ if (process.env.NODE_ENV !== 'production') {
 // Middleware
 app.use(cors({
   origin: [
-    'http://localhost:3001', // Primary frontend port
-    'http://localhost:3000', // Fallback
-    process.env.CLIENT_URL || 'http://localhost:3001' // Use 3001 as default
+    'http://localhost:3001', // Primary frontend port (Weather Analytics)
+    process.env.CLIENT_URL || 'http://localhost:3001', // Use 3001 as default
+    // Note: localhost:3000 is intentionally excluded - it's a different project
+    // Add production frontend URL here when deploying
+    ...(process.env.CLIENT_URL && process.env.NODE_ENV === 'production' ? [process.env.CLIENT_URL] : [])
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -51,17 +53,50 @@ app.use(passport.session());
 // Connect to MongoDB with better error handling
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/weather-analytics', {
-      serverSelectionTimeoutMS: 10000, // Timeout after 10s instead of 30s
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/weather-analytics';
+    
+    // MongoDB Atlas connection options
+    const options = {
+      serverSelectionTimeoutMS: 10000, // Timeout after 10s
       socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
-    });
+    };
+    
+    // For MongoDB Atlas, ensure SSL is enabled
+    if (mongoUri.includes('mongodb.net') || mongoUri.includes('mongodb+srv')) {
+      // Atlas connections should use SSL by default, but we can be explicit
+      console.log('🔗 Connecting to MongoDB Atlas...');
+    } else {
+      console.log('🔗 Connecting to local MongoDB...');
+    }
+    
+    const conn = await mongoose.connect(mongoUri, options);
     console.log('✅ MongoDB Connected');
     console.log('   Database:', conn.connection.name);
     console.log('   Host:', conn.connection.host);
     return true;
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
-    console.error('   Please check your MONGODB_URI in .env file');
+    
+    // Provide helpful error messages
+    if (err.message.includes('IP') || err.message.includes('whitelist')) {
+      console.error('\n⚠️  MONGODB ATLAS IP WHITELIST ISSUE:');
+      console.error('   Your IP address is not whitelisted in MongoDB Atlas.');
+      console.error('   To fix this:');
+      console.error('   1. Go to: https://cloud.mongodb.com');
+      console.error('   2. Navigate to: Security > Network Access');
+      console.error('   3. Click "Add IP Address"');
+      console.error('   4. Click "Allow Access from Anywhere" (0.0.0.0/0)');
+      console.error('      OR add Render\'s IP ranges');
+      console.error('   5. Save and wait 1-2 minutes for changes to propagate\n');
+    }
+    
+    if (err.message.includes('authentication')) {
+      console.error('\n⚠️  MONGODB AUTHENTICATION ISSUE:');
+      console.error('   Check your MONGODB_URI - username/password might be incorrect.');
+      console.error('   Format: mongodb+srv://username:password@cluster.mongodb.net/database\n');
+    }
+    
+    console.error('   Please check your MONGODB_URI in environment variables');
     // Don't exit - let the server start, but OAuth will fail gracefully
     return false;
   }
