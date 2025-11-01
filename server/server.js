@@ -8,12 +8,24 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust proxy for accurate HTTPS detection (important for deployment platforms)
+// This helps with cookies and SSL/TLS detection
+app.set('trust proxy', 1);
+
+// Fix SSL/TLS issues with Google OAuth (for local development only)
+// This disables SSL certificate validation in development
+// WARNING: Only use in development, never in production!
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.log('⚠️  TLS rejection disabled for development');
+}
+
 // Middleware
 app.use(cors({
   origin: [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    process.env.CLIENT_URL || 'http://localhost:3000'
+    'http://localhost:3001', // Primary frontend port
+    'http://localhost:3000', // Fallback
+    process.env.CLIENT_URL || 'http://localhost:3001' // Use 3001 as default
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -27,15 +39,60 @@ app.use(session({
   secret: process.env.JWT_SECRET || 'secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false }
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    httpOnly: true
+  }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/weather-analytics')
-  .then(() => console.log('✅ MongoDB Connected'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+// Connect to MongoDB with better error handling
+const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/weather-analytics', {
+      serverSelectionTimeoutMS: 10000, // Timeout after 10s instead of 30s
+      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+    });
+    console.log('✅ MongoDB Connected');
+    console.log('   Database:', conn.connection.name);
+    console.log('   Host:', conn.connection.host);
+    return true;
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    console.error('   Please check your MONGODB_URI in .env file');
+    // Don't exit - let the server start, but OAuth will fail gracefully
+    return false;
+  }
+};
+
+// Connect to database
+connectDB();
+
+// Handle MongoDB connection events
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('⚠️  MongoDB disconnected');
+  // Try to reconnect after 5 seconds
+  setTimeout(() => {
+    if (mongoose.connection.readyState === 0) {
+      console.log('🔄 Attempting to reconnect to MongoDB...');
+      connectDB();
+    }
+  }, 5000);
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('✅ MongoDB reconnected');
+});
+
+mongoose.connection.on('connecting', () => {
+  console.log('🔄 Connecting to MongoDB...');
+});
 
 // Routes (this import sets up passport strategies)
 app.use('/api/auth', require('./routes/auth'));
@@ -59,8 +116,16 @@ app.use((req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
+  console.error('Error stack:', err.stack);
+  
+  // Don't expose internal errors in production
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Internal server error' 
+    : err.message || 'Internal server error';
+  
   res.status(err.status || 500).json({ 
-    message: err.message || 'Internal server error' 
+    message: message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
   });
 });
 
