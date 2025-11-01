@@ -16,9 +16,20 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 // In production (Render), use RENDER_EXTERNAL_URL or construct from available env vars
 // In development, use localhost
 let callbackURL;
+
+// Check if we're on Render (by checking for Render-specific env vars or PORT)
+// Render typically sets RENDER_EXTERNAL_URL automatically, but we can also detect by:
+// - PORT being 10000 (Render's default) or other non-dev ports
+// - RENDER environment variable (sometimes set by Render)
+// - PORT existing but not being our dev ports (5001, 3001)
+const isRender = !!process.env.RENDER_EXTERNAL_URL || 
+                 !!process.env.RENDER || 
+                 (process.env.PORT && process.env.PORT !== '5001' && process.env.PORT !== '3001' && parseInt(process.env.PORT) >= 10000);
+const isProduction = process.env.NODE_ENV === 'production' || isRender;
+
 if (process.env.CALLBACK_URL) {
   callbackURL = process.env.CALLBACK_URL;
-} else if (process.env.NODE_ENV === 'production') {
+} else if (isProduction || isRender) {
   // For Render deployment - Render sets RENDER_EXTERNAL_URL automatically
   const baseUrl = process.env.RENDER_EXTERNAL_URL || 
                   process.env.RENDER_URL || 
@@ -26,8 +37,13 @@ if (process.env.CALLBACK_URL) {
                   (process.env.RENDER_SERVICE_NAME ? `https://${process.env.RENDER_SERVICE_NAME}.onrender.com` : null);
   
   if (!baseUrl) {
-    console.error('⚠️  WARNING: Could not determine production URL. Set CALLBACK_URL environment variable.');
-    callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+    // Try to detect from common Render patterns
+    // Render services typically have a specific URL pattern
+    console.error('⚠️  WARNING: Could not determine production URL automatically.');
+    console.error('   Please set CALLBACK_URL environment variable in Render.');
+    console.error('   Example: https://your-service-name.onrender.com/api/auth/google/callback');
+    // Fallback: use a placeholder that won't work but at least shows the issue
+    callbackURL = `https://your-service-name.onrender.com/api/auth/google/callback`;
   } else {
     callbackURL = `${baseUrl}/api/auth/google/callback`;
   }
@@ -40,14 +56,15 @@ console.log('🔧 OAuth Configuration:');
 console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID ? '✓ Set' : '✗ Missing');
 console.log('   Client Secret:', process.env.GOOGLE_CLIENT_SECRET ? '✓ Set' : '✗ Missing');
 console.log('   Callback URL:', callbackURL);
-console.log('   Environment:', process.env.NODE_ENV || 'development');
+console.log('   Environment:', process.env.NODE_ENV || (isRender ? 'production (Render)' : 'development'));
+console.log('   Render detected:', isRender ? 'Yes' : 'No');
 
 // Configure Google OAuth Strategy
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   callbackURL: callbackURL,
-  proxy: process.env.NODE_ENV === 'production' // Enable proxy in production (for Render/Heroku)
+  proxy: isProduction || isRender // Enable proxy in production or on Render (for Render/Heroku)
 }, async (accessToken, refreshToken, profile, done) => {
   try {
     // Log successful token exchange
