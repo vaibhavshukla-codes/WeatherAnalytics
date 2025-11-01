@@ -37,16 +37,33 @@ app.use(express.json());
 app.use(cookieParser());
 
 // Passport and session middleware
-app.use(session({
+// Note: We use JWT tokens for authentication, not sessions
+// Sessions are only used by Passport for OAuth flow temporary state
+const sessionConfig = {
   secret: process.env.JWT_SECRET || 'secret',
   resave: false,
   saveUninitialized: false,
   cookie: { 
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    httpOnly: true
+    httpOnly: true,
+    maxAge: 1000 * 60 * 10 // 10 minutes (only for OAuth flow)
   }
-}));
+};
+
+// In production, suppress MemoryStore warning since we don't rely on sessions
+// (We use JWT tokens instead, sessions are only for OAuth temporary state)
+if (process.env.NODE_ENV === 'production') {
+  // Suppress the MemoryStore warning in production
+  const originalWarning = console.warn;
+  console.warn = function(...args) {
+    if (!args[0] || !args[0].includes('MemoryStore')) {
+      originalWarning.apply(console, args);
+    }
+  };
+}
+
+app.use(session(sessionConfig));
 app.use(passport.initialize());
 app.use(passport.session());
 
