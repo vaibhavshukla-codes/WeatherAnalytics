@@ -9,8 +9,19 @@ const PrivateRoute = ({ children }) => {
 
   // Re-check auth when component mounts (in case coming from OAuth redirect)
   useEffect(() => {
-    // Only check once if not authenticated and not already loading
-    if (!isAuthenticated && !isLoading) {
+    // Check for token in URL first (OAuth redirect fallback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+    
+    if (tokenFromUrl) {
+      // Store token in cookie
+      document.cookie = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=None; Secure`;
+      // Clean up URL immediately
+      window.history.replaceState({}, '', window.location.pathname);
+      // Force auth check
+      dispatch(checkAuth());
+    } else if (!isAuthenticated && !isLoading) {
+      // Normal auth check
       dispatch(checkAuth());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -533,18 +533,24 @@ router.get('/google/callback',
       );
 
       // Determine if we're using HTTPS (check proxy headers)
+      // Always use secure cookies in production (Render/Vercel)
       const isSecure = req.secure || 
                       req.headers['x-forwarded-proto'] === 'https' || 
                       req.headers['x-forwarded-ssl'] === 'on' ||
-                      process.env.NODE_ENV === 'production';
+                      isProduction ||
+                      isRender;
       
-      // Cookie configuration - fix SSL/TLS issues
+      // Get client URL before setting cookie
+      const clientUrl = getClientUrl(req);
+      
+      // Cookie configuration - optimized for cross-domain (Vercel frontend + Render backend)
       const cookieOptions = {
         httpOnly: true,
         secure: isSecure,
-        sameSite: isSecure ? 'none' : 'lax',
+        sameSite: isSecure ? 'none' : 'lax', // 'none' allows cross-domain cookies
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: '/'
+        path: '/',
+        domain: undefined // Don't set domain - let browser handle it
       };
 
       // Only set sameSite: 'none' if secure is true (required by browsers)
@@ -552,12 +558,20 @@ router.get('/google/callback',
         cookieOptions.sameSite = 'lax';
       }
 
+      console.log(`🍪 Setting auth cookie:`, {
+        secure: cookieOptions.secure,
+        sameSite: cookieOptions.sameSite,
+        httpOnly: cookieOptions.httpOnly,
+        clientUrl: clientUrl
+      });
+
       res.cookie('token', token, cookieOptions);
 
-      // Redirect to dashboard - auto-detects network IP if accessed from network
-      const clientUrl = getClientUrl(req);
-      console.log(`✅ OAuth successful! Redirecting to: ${clientUrl}/dashboard`);
-      res.redirect(`${clientUrl}/dashboard`);
+      // Also send token in redirect URL as fallback (for immediate auth check)
+      // This ensures auth works even if cookie takes a moment to be set
+      const redirectUrl = `${clientUrl}/dashboard?token=${token}`;
+      console.log(`✅ OAuth successful! Redirecting to: ${redirectUrl}`);
+      res.redirect(redirectUrl);
     } catch (error) {
       console.error('OAuth callback error:', error);
       console.error('Error stack:', error.stack);

@@ -38,6 +38,17 @@ function App() {
   const { isAuthenticated, isLoading } = useSelector(state => state.auth);
 
   useEffect(() => {
+    // Check for token in URL (from OAuth redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+    
+    if (tokenFromUrl) {
+      // Store token in cookie manually as fallback
+      document.cookie = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=None; Secure`;
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    
     // Check auth on mount
     dispatch(checkAuth());
     
