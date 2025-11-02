@@ -174,21 +174,49 @@ passport.deserializeUser(async (id, done) => {
 // Google OAuth routes
 router.get('/google',
   (req, res, next) => {
-    // Detect client URL from referer header for network access support
+    // Detect client URL - prioritize origin, then referer, then default
     let clientUrl = 'http://localhost:3001'; // Default
     
-    if (req.headers.referer) {
+    // Priority 1: Origin header (most reliable)
+    if (req.headers.origin) {
+      try {
+        const originUrl = new URL(req.headers.origin);
+        const hostname = originUrl.hostname;
+        
+        // Vercel deployment
+        if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
+          clientUrl = `https://${hostname}`;
+        }
+        // Network IP
+        else if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+          clientUrl = `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
+        }
+        // Other hostname
+        else if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          clientUrl = `${originUrl.protocol}//${hostname}${originUrl.port ? ':' + originUrl.port : ''}`;
+        }
+      } catch (e) {
+        // Invalid origin, continue
+      }
+    }
+    
+    // Priority 2: Referer header
+    if (clientUrl === 'http://localhost:3001' && req.headers.referer) {
       try {
         const refererUrl = new URL(req.headers.referer);
-        // Use the origin from referer (includes hostname and port)
-        clientUrl = refererUrl.origin;
+        const hostname = refererUrl.hostname;
         
-        // If it's a network IP, keep it; otherwise default to localhost:3001
-        if (refererUrl.hostname === 'localhost' || refererUrl.hostname === '127.0.0.1') {
-          clientUrl = 'http://localhost:3001';
-        } else if (refererUrl.hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
-          // Network IP detected - use it with port 3001
-          clientUrl = `http://${refererUrl.hostname}:3001`;
+        // Vercel deployment
+        if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
+          clientUrl = `https://${hostname}`;
+        }
+        // Network IP
+        else if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+          clientUrl = `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+        }
+        // Other hostname
+        else if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          clientUrl = `${refererUrl.protocol}//${hostname}${refererUrl.port ? ':' + refererUrl.port : ''}`;
         }
       } catch (e) {
         // Invalid referer, use default
@@ -199,6 +227,8 @@ router.get('/google',
     const state = Buffer.from(JSON.stringify({ redirect_url: clientUrl })).toString('base64');
     
     console.log(`🔗 OAuth initiated from: ${clientUrl}`);
+    console.log(`   Origin: ${req.headers.origin || 'none'}`);
+    console.log(`   Referer: ${req.headers.referer || 'none'}`);
     
     passport.authenticate('google', { 
       scope: ['profile', 'email'],
@@ -374,43 +404,91 @@ router.get('/google/callback',
     })(req, res, next);
   },
   async (req, res) => {
-    // Determine correct client URL - supports network access
+    // Determine correct client URL - supports network access and Vercel
     const getClientUrl = (req) => {
-      // In production, use CLIENT_URL if set
-      if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
-        return process.env.CLIENT_URL;
-      }
-      
-      // Check OAuth state for redirect_url (passed during OAuth initiation)
+      // Priority 1: Check OAuth state for redirect_url (most reliable)
       if (req.query.state) {
         try {
           const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
           if (state.redirect_url) {
+            console.log(`📍 Using redirect URL from OAuth state: ${state.redirect_url}`);
             return state.redirect_url;
           }
         } catch (e) {
-          // Invalid state, continue
+          console.log('⚠️  Could not parse OAuth state:', e.message);
         }
       }
       
-      // Check referer header to detect where user came from
+      // Priority 2: Check origin header (more reliable than referer)
+      if (req.headers.origin) {
+        try {
+          const originUrl = new URL(req.headers.origin);
+          const hostname = originUrl.hostname;
+          
+          // Vercel deployment (has .vercel.app or custom domain)
+          if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com') || process.env.VERCEL_URL) {
+            const clientUrl = `https://${hostname}`;
+            console.log(`📍 Detected Vercel deployment: ${clientUrl}`);
+            return clientUrl;
+          }
+          
+          // Network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+          if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+            const clientUrl = `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
+            console.log(`📍 Detected network IP: ${clientUrl}`);
+            return clientUrl;
+          }
+          
+          // Any other non-localhost hostname (likely production or custom domain)
+          if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+            const clientUrl = `${originUrl.protocol}//${hostname}${originUrl.port ? ':' + originUrl.port : ''}`;
+            console.log(`📍 Using origin header: ${clientUrl}`);
+            return clientUrl;
+          }
+        } catch (e) {
+          console.log('⚠️  Could not parse origin header:', e.message);
+        }
+      }
+      
+      // Priority 3: Check referer header (fallback)
       if (req.headers.referer) {
         try {
           const refererUrl = new URL(req.headers.referer);
-          // If referer is from local network, use that hostname
-          if (refererUrl.hostname !== 'localhost' && refererUrl.hostname !== '127.0.0.1') {
-            // Check if it's a local network IP
-            const hostname = refererUrl.hostname;
-            if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
-              return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
-            }
+          const hostname = refererUrl.hostname;
+          
+          // Vercel deployment
+          if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
+            const clientUrl = `https://${hostname}`;
+            console.log(`📍 Detected Vercel from referer: ${clientUrl}`);
+            return clientUrl;
+          }
+          
+          // Network IP
+          if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+            const clientUrl = `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+            console.log(`📍 Detected network IP from referer: ${clientUrl}`);
+            return clientUrl;
+          }
+          
+          // Other hostname
+          if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+            const clientUrl = `${refererUrl.protocol}//${hostname}${refererUrl.port ? ':' + refererUrl.port : ''}`;
+            console.log(`📍 Using referer: ${clientUrl}`);
+            return clientUrl;
           }
         } catch (e) {
-          // Invalid referer, fall through to default
+          console.log('⚠️  Could not parse referer:', e.message);
         }
       }
       
-      // Default: use localhost:3001 for local development
+      // Priority 4: Production environment variable
+      if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
+        console.log(`📍 Using CLIENT_URL env var: ${process.env.CLIENT_URL}`);
+        return process.env.CLIENT_URL;
+      }
+      
+      // Default: localhost for local development
+      console.log(`📍 Using default: http://localhost:3001`);
       return 'http://localhost:3001';
     };
     
@@ -493,3 +571,4 @@ router.get('/me', require('../middleware/auth').authenticate, (req, res) => {
 });
 
 module.exports = router;
+
