@@ -43,18 +43,23 @@ function App() {
     const tokenFromUrl = urlParams.get('token');
     
     if (tokenFromUrl) {
-      // Store token in cookie immediately
+      // Decode token (was URL-encoded by backend)
+      const decodedToken = decodeURIComponent(tokenFromUrl);
+      
+      // Store token in cookie as backup (primary is httpOnly cookie from backend)
       const isSecure = window.location.protocol === 'https:';
-      const cookieString = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; ${isSecure ? 'SameSite=None; Secure;' : ''}`;
+      const cookieString = `token=${decodedToken}; path=/; max-age=${7 * 24 * 60 * 60}; ${isSecure ? 'SameSite=None; Secure;' : 'SameSite=Lax;'}`;
       document.cookie = cookieString;
       
-      // IMMEDIATELY remove token from URL for security (don't expose token in URL)
+      // IMMEDIATELY remove token from URL for security (don't expose token in browser history/URL)
       window.history.replaceState({}, '', window.location.pathname);
       
-      // Force immediate auth check
-      dispatch(checkAuth());
+      // Small delay to ensure cookie is set, then check auth
+      setTimeout(() => {
+        dispatch(checkAuth());
+      }, 100);
     } else {
-      // Normal auth check on mount
+      // Normal auth check on mount (will use httpOnly cookie from backend)
       dispatch(checkAuth());
     }
     

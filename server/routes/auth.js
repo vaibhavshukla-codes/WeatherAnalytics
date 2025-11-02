@@ -28,6 +28,10 @@ const isRender = !!process.env.RENDER_EXTERNAL_URL ||
 // STRICT production check: Must be explicitly set or running on Render
 const isProduction = process.env.NODE_ENV === 'production' || isRender;
 
+// CRITICAL: Force production URL if we're on Render or in production
+// This prevents localhost callback URL being used in production
+const FORCE_PRODUCTION_URL = 'https://weather-analytics-api-xsyq.onrender.com/api/auth/google/callback';
+
 // Determine callback URL with explicit priority
 if (process.env.CALLBACK_URL) {
   // Priority 1: Explicitly set callback URL (most reliable)
@@ -44,30 +48,36 @@ if (process.env.CALLBACK_URL) {
     baseUrl = `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
   }
   
-  // Last resort: Use known Render URL (your production backend)
+  // CRITICAL: If still not detected, FORCE production URL (never use localhost in production)
   if (!baseUrl) {
-    baseUrl = 'https://weather-analytics-api-xsyq.onrender.com';
-    console.warn('⚠️  Render URL not detected. Using known production URL.');
+    console.warn('⚠️  Render URL not detected. FORCING production URL to prevent localhost callback.');
     console.warn('   To fix: Set CALLBACK_URL or RENDER_EXTERNAL_URL in Render dashboard.');
+    callbackURL = FORCE_PRODUCTION_URL;
+  } else {
+    callbackURL = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
   }
-  
-  callbackURL = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
   console.log('✅ Production callback URL:', callbackURL);
 } else {
-  // Priority 3: Development - only use localhost if explicitly in dev
-  // Check if we're really in development (not accidentally in production)
-  const isDefinitelyDevelopment = process.env.NODE_ENV !== 'production' && 
-                                  !isRender && 
-                                  (!process.env.PORT || process.env.PORT === '5001' || process.env.PORT === '3001');
+  // Priority 3: Development - only use localhost if DEFINITELY in development
+  // Be VERY strict about this - if there's ANY doubt, use production
+  const port = process.env.PORT || '5001';
+  const isDefinitelyDevelopment = 
+    process.env.NODE_ENV !== 'production' && 
+    !isRender && 
+    !process.env.RENDER_EXTERNAL_URL &&
+    !process.env.RENDER_URL &&
+    !process.env.RENDER_SERVICE_NAME &&
+    (port === '5001' || port === '3001') &&
+    process.env.HOST !== '0.0.0.0';
   
   if (isDefinitelyDevelopment) {
-    callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+    callbackURL = `http://localhost:${port}/api/auth/google/callback`;
     console.log('✅ Development callback URL:', callbackURL);
   } else {
-    // Safety fallback: if unclear, default to production to avoid errors
-    callbackURL = 'https://weather-analytics-api-xsyq.onrender.com/api/auth/google/callback';
-    console.warn('⚠️  Environment unclear. Defaulting to production callback URL.');
-    console.warn('   To fix: Set NODE_ENV=production and CALLBACK_URL in Render.');
+    // Safety fallback: if unclear, ALWAYS default to production to avoid errors
+    console.warn('⚠️  Environment unclear. FORCING production callback URL to prevent OAuth errors.');
+    console.warn('   If you are in development, ensure NODE_ENV is not set to "production".');
+    callbackURL = FORCE_PRODUCTION_URL;
   }
 }
 
@@ -269,14 +279,14 @@ router.get('/google/callback',
       errorDescription: req.query.error_description
     });
     
-    // Determine correct client URL - supports network access
+    // Determine correct client URL - supports network access and Vercel
     const getClientUrl = (req) => {
-      // In production, use CLIENT_URL if set
+      // Priority 1: Production environment variable (most reliable)
       if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
         return process.env.CLIENT_URL;
       }
       
-      // Check OAuth state for redirect_url (passed during OAuth initiation)
+      // Priority 2: Check OAuth state for redirect_url (passed during OAuth initiation)
       if (req.query.state) {
         try {
           const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
@@ -288,21 +298,65 @@ router.get('/google/callback',
         }
       }
       
-      // Check referer header to detect where user came from
+      // Priority 3: Check origin header (for browser requests)
+      if (req.headers.origin) {
+        try {
+          const originUrl = new URL(req.headers.origin);
+          const hostname = originUrl.hostname;
+          
+          // Vercel deployment
+          if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
+            return `https://${hostname}`;
+          }
+          // Render frontend
+          else if (hostname.includes('.onrender.com')) {
+            return `${originUrl.protocol}//${hostname}`;
+          }
+          // Network IP
+          else if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+            return `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
+          }
+          // Other non-localhost
+          else if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+            return originUrl.origin;
+          }
+        } catch (e) {
+          // Invalid origin, continue
+        }
+      }
+      
+      // Priority 4: Check referer header (fallback)
       if (req.headers.referer) {
         try {
           const refererUrl = new URL(req.headers.referer);
-          // If referer is from local network, use that hostname
-          if (refererUrl.hostname !== 'localhost' && refererUrl.hostname !== '127.0.0.1') {
-            // Check if it's a local network IP (192.168.x.x, 10.x.x.x, etc.)
-            const hostname = refererUrl.hostname;
-            if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
-              return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
-            }
+          const hostname = refererUrl.hostname;
+          
+          // Vercel
+          if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
+            return `https://${hostname}`;
+          }
+          // Render
+          else if (hostname.includes('.onrender.com')) {
+            return `${refererUrl.protocol}//${hostname}`;
+          }
+          // Network IP
+          else if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+            return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+          }
+          // Other non-localhost
+          else if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+            return refererUrl.origin;
           }
         } catch (e) {
-          // Invalid referer, fall through to default
+          // Invalid referer, continue
         }
+      }
+      
+      // Priority 5: Default based on environment
+      // In production, try to use Vercel URL if available, otherwise default
+      if (process.env.NODE_ENV === 'production') {
+        // Try to construct from known Vercel URL patterns or use CLIENT_URL
+        return process.env.CLIENT_URL || 'http://localhost:3001';
       }
       
       // Default: use localhost:3001 for local development
@@ -336,14 +390,26 @@ router.get('/google/callback',
       session: false,
       failureFlash: false
     },       (err, user, info) => {
-      // Determine correct client URL - supports network access
+      // Determine correct client URL - supports network access and Vercel
       const getClientUrl = (req) => {
-        // In production, use CLIENT_URL if set
+        // Priority 1: Production environment variable (most reliable)
         if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
           return process.env.CLIENT_URL;
         }
         
-        // Check if there's a redirect_url in query params (from OAuth state)
+        // Priority 2: Check OAuth state for redirect_url (most reliable)
+        if (req.query.state) {
+          try {
+            const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
+            if (state.redirect_url) {
+              return state.redirect_url;
+            }
+          } catch (e) {
+            // Invalid state, continue
+          }
+        }
+        
+        // Priority 3: Check if there's a redirect_url in query params (fallback)
         if (req.query.redirect_url) {
           return decodeURIComponent(req.query.redirect_url);
         }
@@ -612,15 +678,19 @@ router.get('/google/callback',
         });
       }
 
+      // Set cookie first (httpOnly, secure)
       res.cookie('token', token, cookieOptions);
 
-      // Also send token in redirect URL as fallback (for immediate auth check)
-      // This ensures auth works even if cookie takes a moment to be set
-      // NOTE: Frontend will immediately remove token from URL for security
-      const redirectUrl = `${clientUrl}/dashboard?token=${token}`;
+      // Also include token in redirect URL as immediate fallback
+      // Frontend will extract token from URL and remove it immediately for security
+      const redirectUrl = `${clientUrl}/dashboard?token=${encodeURIComponent(token)}`;
+      
       if (process.env.NODE_ENV !== 'production') {
         console.log(`✅ OAuth successful! Redirecting to: ${clientUrl}/dashboard`);
+        console.log(`   Cookie set: secure=${cookieOptions.secure}, sameSite=${cookieOptions.sameSite}`);
       }
+      
+      // Redirect to dashboard with token in URL (frontend handles extraction)
       res.redirect(redirectUrl);
     } catch (error) {
       console.error('OAuth callback error:', error);

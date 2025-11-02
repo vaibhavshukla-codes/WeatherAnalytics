@@ -9,21 +9,27 @@ const PrivateRoute = ({ children }) => {
 
   // Re-check auth when component mounts (in case coming from OAuth redirect)
   useEffect(() => {
-    // Check for token in URL (should already be handled by App.js, but double-check)
-    const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get('token');
+    // Small delay to ensure App.js has processed token from URL first
+    const checkToken = setTimeout(() => {
+      // Check for token in URL (fallback - App.js should handle this)
+      const urlParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = urlParams.get('token');
+      
+      if (tokenFromUrl) {
+        // Store token in cookie and remove from URL immediately (security)
+        const decodedToken = decodeURIComponent(tokenFromUrl);
+        const isSecure = window.location.protocol === 'https:';
+        const cookieString = `token=${decodedToken}; path=/; max-age=${7 * 24 * 60 * 60}; ${isSecure ? 'SameSite=None; Secure;' : 'SameSite=Lax;'}`;
+        document.cookie = cookieString;
+        window.history.replaceState({}, '', window.location.pathname);
+        dispatch(checkAuth());
+      } else if (!isAuthenticated && !isLoading) {
+        // Normal auth check if no token in URL
+        dispatch(checkAuth());
+      }
+    }, 50); // Small delay to let App.js handle it first
     
-    if (tokenFromUrl) {
-      // Store token in cookie and remove from URL immediately
-      const isSecure = window.location.protocol === 'https:';
-      const cookieString = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; ${isSecure ? 'SameSite=None; Secure;' : ''}`;
-      document.cookie = cookieString;
-      window.history.replaceState({}, '', window.location.pathname);
-      dispatch(checkAuth());
-    } else if (!isAuthenticated && !isLoading) {
-      // Normal auth check if no token in URL
-      dispatch(checkAuth());
-    }
+    return () => clearTimeout(checkToken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount to avoid infinite loops
 
