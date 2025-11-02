@@ -50,7 +50,7 @@ export const API_URL = getApiUrl();
 export const API_BASE_URL = getApiBaseUrl();
 
 // Log for debugging (only in development)
-if (process.env.NODE_ENV === 'development') {
+if (process.env.NODE_ENV === 'development' && window.location.hostname === 'localhost') {
   console.log('🌐 API Configuration:');
   console.log('   Hostname:', window.location.hostname);
   console.log('   API URL:', API_URL);

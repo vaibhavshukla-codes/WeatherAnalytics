@@ -68,8 +68,8 @@ JWT_SECRET=your-jwt-secret-here
 WEATHER_API_KEY=your-openweather-api-key
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
-PORT=5000
-CLIENT_URL=http://localhost:3000
+PORT=5001
+CLIENT_URL=http://localhost:3001
 ```
 
 4. Start MongoDB (if running locally)
@@ -87,8 +87,8 @@ npm run dev
 ```
 
 The application will be available at:
-- Frontend: http://localhost:3000
-- Backend: http://localhost:5000
+- Frontend: http://localhost:3001
+- Backend: http://localhost:5001
 
 ## API Keys Setup
 
@@ -102,7 +102,7 @@ The application will be available at:
 2. Create a new project
 3. Enable Google+ API
 4. Create OAuth 2.0 credentials
-5. Configure redirect URI: `http://localhost:5000/api/auth/google/callback`
+5. Configure redirect URI: `http://localhost:5001/api/auth/google/callback` (for local dev) or your Render callback URL (for production)
 6. Add credentials to `.env` file
 
 ## Usage

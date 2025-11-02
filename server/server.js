@@ -59,8 +59,14 @@ const corsOptions = {
       if (isAllowed) {
         callback(null, true);
       } else {
-        console.warn(`⚠️  CORS blocked origin: ${origin}`);
-        callback(null, true); // Temporarily allow all for debugging - remove in production
+        // In production, block unauthorized origins
+        if (process.env.NODE_ENV === 'production') {
+          console.warn(`⚠️  CORS blocked origin: ${origin}`);
+          callback(new Error(`CORS: Origin ${origin} not allowed`), false);
+        } else {
+          // In development, allow for debugging
+          callback(null, true);
+        }
       }
     }
   },

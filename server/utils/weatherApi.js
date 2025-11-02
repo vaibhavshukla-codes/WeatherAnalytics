@@ -17,7 +17,9 @@ const getCurrentWeather = async (lat, lon) => {
   // Check cache first
   const cached = getFromCache(cacheKey);
   if (cached) {
-    console.log('📦 Serving from cache:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📦 Serving from cache:', cacheKey);
+    }
     return cached;
   }
 
@@ -43,7 +45,9 @@ const getCurrentWeather = async (lat, lon) => {
 
     // Cache the data
     setInCache(cacheKey, data, 60);
-    console.log('🌍 Fetched from API:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🌍 Fetched from API:', cacheKey);
+    }
     
     return data;
   } catch (error) {
@@ -64,7 +68,9 @@ const getForecast = async (lat, lon) => {
   // Check cache first
   const cached = getFromCache(cacheKey);
   if (cached) {
-    console.log('📦 Serving from cache:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📦 Serving from cache:', cacheKey);
+    }
     return cached;
   }
 
@@ -90,7 +96,9 @@ const getForecast = async (lat, lon) => {
 
     // Cache the data
     setInCache(cacheKey, data, 60);
-    console.log('🌍 Fetched from API:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🌍 Fetched from API:', cacheKey);
+    }
     
     return data;
   } catch (error) {
@@ -111,7 +119,9 @@ const searchCities = async (query) => {
   // Check cache first
   const cached = getFromCache(cacheKey);
   if (cached) {
-    console.log('📦 Serving from cache:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📦 Serving from cache:', cacheKey);
+    }
     return cached;
   }
 
@@ -133,7 +143,9 @@ const searchCities = async (query) => {
 
     // Cache the data (longer TTL for city searches)
     setInCache(cacheKey, data, 3600); // 1 hour
-    console.log('🌍 Fetched from API:', cacheKey);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🌍 Fetched from API:', cacheKey);
+    }
     
     return data;
   } catch (error) {

@@ -38,19 +38,25 @@ function App() {
   const { isAuthenticated, isLoading } = useSelector(state => state.auth);
 
   useEffect(() => {
-    // Check for token in URL (from OAuth redirect)
+    // Check for token in URL (from OAuth redirect) - remove immediately for security
     const urlParams = new URLSearchParams(window.location.search);
     const tokenFromUrl = urlParams.get('token');
     
     if (tokenFromUrl) {
-      // Store token in cookie manually as fallback
-      document.cookie = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=None; Secure`;
-      // Clean up URL
+      // Store token in cookie immediately
+      const isSecure = window.location.protocol === 'https:';
+      const cookieString = `token=${tokenFromUrl}; path=/; max-age=${7 * 24 * 60 * 60}; ${isSecure ? 'SameSite=None; Secure;' : ''}`;
+      document.cookie = cookieString;
+      
+      // IMMEDIATELY remove token from URL for security (don't expose token in URL)
       window.history.replaceState({}, '', window.location.pathname);
+      
+      // Force immediate auth check
+      dispatch(checkAuth());
+    } else {
+      // Normal auth check on mount
+      dispatch(checkAuth());
     }
-    
-    // Check auth on mount
-    dispatch(checkAuth());
     
     // Also check auth when window regains focus (after OAuth redirect)
     // But only check once per focus to avoid excessive calls

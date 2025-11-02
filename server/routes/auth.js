@@ -229,9 +229,11 @@ router.get('/google',
     // Pass client URL in OAuth state (Google will return it in callback)
     const state = Buffer.from(JSON.stringify({ redirect_url: clientUrl })).toString('base64');
     
-    console.log(`🔗 OAuth initiated from: ${clientUrl}`);
-    console.log(`   Origin: ${req.headers.origin || 'none'}`);
-    console.log(`   Referer: ${req.headers.referer || 'none'}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`🔗 OAuth initiated from: ${clientUrl}`);
+      console.log(`   Origin: ${req.headers.origin || 'none'}`);
+      console.log(`   Referer: ${req.headers.referer || 'none'}`);
+    }
     
     passport.authenticate('google', { 
       scope: ['profile', 'email'],
@@ -414,11 +416,15 @@ router.get('/google/callback',
         try {
           const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
           if (state.redirect_url) {
-            console.log(`📍 Using redirect URL from OAuth state: ${state.redirect_url}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`📍 Using redirect URL from OAuth state: ${state.redirect_url}`);
+            }
             return state.redirect_url;
           }
         } catch (e) {
-          console.log('⚠️  Could not parse OAuth state:', e.message);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('⚠️  Could not parse OAuth state:', e.message);
+          }
         }
       }
       
@@ -431,32 +437,42 @@ router.get('/google/callback',
         // Vercel deployment (has .vercel.app or custom domain)
         if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com') || process.env.VERCEL_URL) {
           const clientUrl = `https://${hostname}`;
-          console.log(`📍 Detected Vercel deployment: ${clientUrl}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`📍 Detected Vercel deployment: ${clientUrl}`);
+          }
           return clientUrl;
         }
         
         // Render frontend (if deployed separately)
         if (hostname.includes('.onrender.com')) {
           const clientUrl = `${originUrl.protocol}//${hostname}`;
-          console.log(`📍 Detected Render deployment: ${clientUrl}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`📍 Detected Render deployment: ${clientUrl}`);
+          }
           return clientUrl;
         }
         
         // Network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
         if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
           const clientUrl = `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
-          console.log(`📍 Detected network IP: ${clientUrl}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`📍 Detected network IP: ${clientUrl}`);
+          }
           return clientUrl;
         }
         
         // Any other non-localhost hostname (likely production or custom domain)
         if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
           const clientUrl = `${originUrl.protocol}//${hostname}${originUrl.port ? ':' + originUrl.port : ''}`;
-          console.log(`📍 Using origin header: ${clientUrl}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`📍 Using origin header: ${clientUrl}`);
+          }
           return clientUrl;
         }
       } catch (e) {
-        console.log('⚠️  Could not parse origin header:', e.message);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('⚠️  Could not parse origin header:', e.message);
+        }
       }
     }
       
@@ -469,38 +485,47 @@ router.get('/google/callback',
           // Vercel deployment
           if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
             const clientUrl = `https://${hostname}`;
-            console.log(`📍 Detected Vercel from referer: ${clientUrl}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`📍 Detected Vercel from referer: ${clientUrl}`);
+            }
             return clientUrl;
           }
           
           // Render frontend
           if (hostname.includes('.onrender.com')) {
             const clientUrl = `${refererUrl.protocol}//${hostname}`;
-            console.log(`📍 Detected Render from referer: ${clientUrl}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`📍 Detected Render from referer: ${clientUrl}`);
+            }
             return clientUrl;
           }
           
           // Network IP
           if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
             const clientUrl = `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
-            console.log(`📍 Detected network IP from referer: ${clientUrl}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`📍 Detected network IP from referer: ${clientUrl}`);
+            }
             return clientUrl;
           }
           
           // Other hostname
           if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
             const clientUrl = `${refererUrl.protocol}//${hostname}${refererUrl.port ? ':' + refererUrl.port : ''}`;
-            console.log(`📍 Using referer: ${clientUrl}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`📍 Using referer: ${clientUrl}`);
+            }
             return clientUrl;
           }
         } catch (e) {
-          console.log('⚠️  Could not parse referer:', e.message);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('⚠️  Could not parse referer:', e.message);
+          }
         }
       }
       
       // Priority 4: Production environment variable
       if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
-        console.log(`📍 Using CLIENT_URL env var: ${process.env.CLIENT_URL}`);
         return process.env.CLIENT_URL;
       }
       
@@ -508,12 +533,16 @@ router.get('/google/callback',
       // This is a fallback for when frontend is on Vercel but CLIENT_URL not set
       if (isRender && process.env.VERCEL_URL) {
         const clientUrl = `https://${process.env.VERCEL_URL}`;
-        console.log(`📍 Using VERCEL_URL env var: ${clientUrl}`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📍 Using VERCEL_URL env var: ${clientUrl}`);
+        }
         return clientUrl;
       }
       
       // Default: localhost for local development
-      console.log(`📍 Using default: http://localhost:3001`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`📍 Using default: http://localhost:3001`);
+      }
       return 'http://localhost:3001';
     };
     
@@ -558,19 +587,24 @@ router.get('/google/callback',
         cookieOptions.sameSite = 'lax';
       }
 
-      console.log(`🍪 Setting auth cookie:`, {
-        secure: cookieOptions.secure,
-        sameSite: cookieOptions.sameSite,
-        httpOnly: cookieOptions.httpOnly,
-        clientUrl: clientUrl
-      });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🍪 Setting auth cookie:`, {
+          secure: cookieOptions.secure,
+          sameSite: cookieOptions.sameSite,
+          httpOnly: cookieOptions.httpOnly,
+          clientUrl: clientUrl
+        });
+      }
 
       res.cookie('token', token, cookieOptions);
 
       // Also send token in redirect URL as fallback (for immediate auth check)
       // This ensures auth works even if cookie takes a moment to be set
+      // NOTE: Frontend will immediately remove token from URL for security
       const redirectUrl = `${clientUrl}/dashboard?token=${token}`;
-      console.log(`✅ OAuth successful! Redirecting to: ${redirectUrl}`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`✅ OAuth successful! Redirecting to: ${clientUrl}/dashboard`);
+      }
       res.redirect(redirectUrl);
     } catch (error) {
       console.error('OAuth callback error:', error);
