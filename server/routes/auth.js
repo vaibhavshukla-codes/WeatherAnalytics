@@ -18,41 +18,57 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 let callbackURL;
 
 // Determine if we're in production or on Render
-// Check for Render-specific environment variables
+// Check for Render-specific environment variables OR production environment
 const isRender = !!process.env.RENDER_EXTERNAL_URL || 
                  !!process.env.RENDER || 
                  process.env.RENDER_SERVICE_NAME ||
+                 process.env.RENDER_URL ||
                  (process.env.PORT && process.env.PORT !== '5001' && process.env.PORT !== '3001' && parseInt(process.env.PORT) >= 10000);
+
+// STRICT production check: Must be explicitly set or running on Render
 const isProduction = process.env.NODE_ENV === 'production' || isRender;
 
-// Determine callback URL
+// Determine callback URL with explicit priority
 if (process.env.CALLBACK_URL) {
-  // Use explicitly set callback URL
+  // Priority 1: Explicitly set callback URL (most reliable)
   callbackURL = process.env.CALLBACK_URL;
+  console.log('✅ Using CALLBACK_URL from environment:', callbackURL);
 } else if (isProduction || isRender) {
-  // For Render/production deployment
-  // Try multiple methods to detect the base URL
+  // Priority 2: Production/Render deployment - construct from available vars
   let baseUrl = process.env.RENDER_EXTERNAL_URL || 
                 process.env.RENDER_URL || 
                 process.env.BACKEND_URL;
   
-  // If still not found, try constructing from service name
+  // Try constructing from service name
   if (!baseUrl && process.env.RENDER_SERVICE_NAME) {
     baseUrl = `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
   }
   
-  // Last resort: try to detect from request or use hardcoded known URL
+  // Last resort: Use known Render URL (your production backend)
   if (!baseUrl) {
-    // Hardcode known Render URL
     baseUrl = 'https://weather-analytics-api-xsyq.onrender.com';
-    console.warn('⚠️  Could not detect Render URL automatically. Using hardcoded URL.');
-    console.warn('   For production, set CALLBACK_URL or RENDER_EXTERNAL_URL environment variable.');
+    console.warn('⚠️  Render URL not detected. Using known production URL.');
+    console.warn('   To fix: Set CALLBACK_URL or RENDER_EXTERNAL_URL in Render dashboard.');
   }
   
   callbackURL = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
+  console.log('✅ Production callback URL:', callbackURL);
 } else {
-  // Development
-  callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+  // Priority 3: Development - only use localhost if explicitly in dev
+  // Check if we're really in development (not accidentally in production)
+  const isDefinitelyDevelopment = process.env.NODE_ENV !== 'production' && 
+                                  !isRender && 
+                                  (!process.env.PORT || process.env.PORT === '5001' || process.env.PORT === '3001');
+  
+  if (isDefinitelyDevelopment) {
+    callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
+    console.log('✅ Development callback URL:', callbackURL);
+  } else {
+    // Safety fallback: if unclear, default to production to avoid errors
+    callbackURL = 'https://weather-analytics-api-xsyq.onrender.com/api/auth/google/callback';
+    console.warn('⚠️  Environment unclear. Defaulting to production callback URL.');
+    console.warn('   To fix: Set NODE_ENV=production and CALLBACK_URL in Render.');
+  }
 }
 
 console.log('🔧 OAuth Configuration:');
