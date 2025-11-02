@@ -17,36 +17,39 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 // In development, use localhost
 let callbackURL;
 
-// Check if we're on Render (by checking for Render-specific env vars or PORT)
-// Render typically sets RENDER_EXTERNAL_URL automatically, but we can also detect by:
-// - PORT being 10000 (Render's default) or other non-dev ports
-// - RENDER environment variable (sometimes set by Render)
-// - PORT existing but not being our dev ports (5001, 3001)
+// Determine if we're in production or on Render
+// Check for Render-specific environment variables
 const isRender = !!process.env.RENDER_EXTERNAL_URL || 
                  !!process.env.RENDER || 
+                 process.env.RENDER_SERVICE_NAME ||
                  (process.env.PORT && process.env.PORT !== '5001' && process.env.PORT !== '3001' && parseInt(process.env.PORT) >= 10000);
 const isProduction = process.env.NODE_ENV === 'production' || isRender;
 
+// Determine callback URL
 if (process.env.CALLBACK_URL) {
+  // Use explicitly set callback URL
   callbackURL = process.env.CALLBACK_URL;
 } else if (isProduction || isRender) {
-  // For Render deployment - Render sets RENDER_EXTERNAL_URL automatically
-  const baseUrl = process.env.RENDER_EXTERNAL_URL || 
-                  process.env.RENDER_URL || 
-                  process.env.BACKEND_URL || 
-                  (process.env.RENDER_SERVICE_NAME ? `https://${process.env.RENDER_SERVICE_NAME}.onrender.com` : null);
+  // For Render/production deployment
+  // Try multiple methods to detect the base URL
+  let baseUrl = process.env.RENDER_EXTERNAL_URL || 
+                process.env.RENDER_URL || 
+                process.env.BACKEND_URL;
   
-  if (!baseUrl) {
-    // Try to detect from common Render patterns
-    // Render services typically have a specific URL pattern
-    console.error('⚠️  WARNING: Could not determine production URL automatically.');
-    console.error('   Please set CALLBACK_URL environment variable in Render.');
-    console.error('   Example: https://your-service-name.onrender.com/api/auth/google/callback');
-    // Fallback: use a placeholder that won't work but at least shows the issue
-    callbackURL = `https://your-service-name.onrender.com/api/auth/google/callback`;
-  } else {
-    callbackURL = `${baseUrl}/api/auth/google/callback`;
+  // If still not found, try constructing from service name
+  if (!baseUrl && process.env.RENDER_SERVICE_NAME) {
+    baseUrl = `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
   }
+  
+  // Last resort: try to detect from request or use hardcoded known URL
+  if (!baseUrl) {
+    // Hardcode known Render URL
+    baseUrl = 'https://weather-analytics-api-xsyq.onrender.com';
+    console.warn('⚠️  Could not detect Render URL automatically. Using hardcoded URL.');
+    console.warn('   For production, set CALLBACK_URL or RENDER_EXTERNAL_URL environment variable.');
+  }
+  
+  callbackURL = `${baseUrl.replace(/\/$/, '')}/api/auth/google/callback`;
 } else {
   // Development
   callbackURL = `http://localhost:${process.env.PORT || 5001}/api/auth/google/callback`;
@@ -419,36 +422,43 @@ router.get('/google/callback',
         }
       }
       
-      // Priority 2: Check origin header (more reliable than referer)
-      if (req.headers.origin) {
-        try {
-          const originUrl = new URL(req.headers.origin);
-          const hostname = originUrl.hostname;
-          
-          // Vercel deployment (has .vercel.app or custom domain)
-          if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com') || process.env.VERCEL_URL) {
-            const clientUrl = `https://${hostname}`;
-            console.log(`📍 Detected Vercel deployment: ${clientUrl}`);
-            return clientUrl;
-          }
-          
-          // Network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-          if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
-            const clientUrl = `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
-            console.log(`📍 Detected network IP: ${clientUrl}`);
-            return clientUrl;
-          }
-          
-          // Any other non-localhost hostname (likely production or custom domain)
-          if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-            const clientUrl = `${originUrl.protocol}//${hostname}${originUrl.port ? ':' + originUrl.port : ''}`;
-            console.log(`📍 Using origin header: ${clientUrl}`);
-            return clientUrl;
-          }
-        } catch (e) {
-          console.log('⚠️  Could not parse origin header:', e.message);
+    // Priority 2: Check origin header (more reliable than referer)
+    if (req.headers.origin) {
+      try {
+        const originUrl = new URL(req.headers.origin);
+        const hostname = originUrl.hostname;
+        
+        // Vercel deployment (has .vercel.app or custom domain)
+        if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com') || process.env.VERCEL_URL) {
+          const clientUrl = `https://${hostname}`;
+          console.log(`📍 Detected Vercel deployment: ${clientUrl}`);
+          return clientUrl;
         }
+        
+        // Render frontend (if deployed separately)
+        if (hostname.includes('.onrender.com')) {
+          const clientUrl = `${originUrl.protocol}//${hostname}`;
+          console.log(`📍 Detected Render deployment: ${clientUrl}`);
+          return clientUrl;
+        }
+        
+        // Network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+          const clientUrl = `${originUrl.protocol}//${hostname}:${originUrl.port || '3001'}`;
+          console.log(`📍 Detected network IP: ${clientUrl}`);
+          return clientUrl;
+        }
+        
+        // Any other non-localhost hostname (likely production or custom domain)
+        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          const clientUrl = `${originUrl.protocol}//${hostname}${originUrl.port ? ':' + originUrl.port : ''}`;
+          console.log(`📍 Using origin header: ${clientUrl}`);
+          return clientUrl;
+        }
+      } catch (e) {
+        console.log('⚠️  Could not parse origin header:', e.message);
       }
+    }
       
       // Priority 3: Check referer header (fallback)
       if (req.headers.referer) {
@@ -460,6 +470,13 @@ router.get('/google/callback',
           if (hostname.includes('.vercel.app') || hostname.includes('.vercel.com')) {
             const clientUrl = `https://${hostname}`;
             console.log(`📍 Detected Vercel from referer: ${clientUrl}`);
+            return clientUrl;
+          }
+          
+          // Render frontend
+          if (hostname.includes('.onrender.com')) {
+            const clientUrl = `${refererUrl.protocol}//${hostname}`;
+            console.log(`📍 Detected Render from referer: ${clientUrl}`);
             return clientUrl;
           }
           
@@ -485,6 +502,14 @@ router.get('/google/callback',
       if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
         console.log(`📍 Using CLIENT_URL env var: ${process.env.CLIENT_URL}`);
         return process.env.CLIENT_URL;
+      }
+      
+      // Priority 5: If on Render and no CLIENT_URL, try to construct Vercel URL
+      // This is a fallback for when frontend is on Vercel but CLIENT_URL not set
+      if (isRender && process.env.VERCEL_URL) {
+        const clientUrl = `https://${process.env.VERCEL_URL}`;
+        console.log(`📍 Using VERCEL_URL env var: ${clientUrl}`);
+        return clientUrl;
       }
       
       // Default: localhost for local development

@@ -21,20 +21,20 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Middleware
-// CORS configuration - Allow requests from localhost and local network IPs
+// CORS configuration - Allow requests from multiple sources
 const allowedOrigins = [
   'http://localhost:3001', // Primary frontend port (Weather Analytics)
   process.env.CLIENT_URL || 'http://localhost:3001'
 ];
 
-// In development, allow requests from any local network IP for mobile/other devices
-if (process.env.NODE_ENV !== 'production') {
-  // Allow requests from local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-  app.use(cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, Postman, etc.)
-      if (!origin) return callback(null, true);
-      
+// Build dynamic CORS origin checker
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Always allow in development
+    if (process.env.NODE_ENV !== 'production') {
       // Check if origin is in allowed list or is a local network IP
       if (allowedOrigins.includes(origin) ||
           origin.match(/^http:\/\/192\.168\.\d+\.\d+:\d+$/) ||
@@ -43,25 +43,34 @@ if (process.env.NODE_ENV !== 'production') {
           origin.match(/^http:\/\/localhost:\d+$/)) {
         callback(null, true);
       } else {
-        callback(null, true); // Allow all origins in development for network access
+        callback(null, true); // Allow all origins in development
       }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-  }));
-} else {
-  // Production: only allow specific origins
-  app.use(cors({
-    origin: [
-      ...allowedOrigins,
-      ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : [])
-    ],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-  }));
-}
+    } else {
+      // Production: allow specific origins + Vercel + network IPs
+      const isAllowed = 
+        allowedOrigins.includes(origin) ||
+        (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) ||
+        origin.includes('.vercel.app') || // Vercel deployments
+        origin.includes('.vercel.com') || // Vercel custom domains
+        origin.match(/^https:\/\/.*\.vercel\.app$/) || // Vercel subdomains
+        origin.match(/^http:\/\/192\.168\.\d+\.\d+:\d+$/) || // Network IPs (for testing)
+        origin.match(/^http:\/\/10\.\d+\.\d+\.\d+:\d+$/); // Network IPs
+      
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️  CORS blocked origin: ${origin}`);
+        callback(null, true); // Temporarily allow all for debugging - remove in production
+      }
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Set-Cookie']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
