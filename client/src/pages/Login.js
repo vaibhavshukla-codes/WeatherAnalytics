@@ -9,11 +9,13 @@ import {
 } from '@mui/material';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 
+import { API_BASE_URL } from '../utils/apiConfig';
+
 const Login = () => {
   const handleGoogleLogin = () => {
-    // Always use port 5001 for backend (this project's backend)
-    const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
-    window.location.href = `${API_URL}/api/auth/google`;
+    // Auto-detects backend URL based on current hostname
+    // Works from localhost AND network IPs
+    window.location.href = `${API_BASE_URL}/api/auth/google`;
   };
 
   return (

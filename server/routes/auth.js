@@ -173,7 +173,38 @@ passport.deserializeUser(async (id, done) => {
 
 // Google OAuth routes
 router.get('/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
+  (req, res, next) => {
+    // Detect client URL from referer header for network access support
+    let clientUrl = 'http://localhost:3001'; // Default
+    
+    if (req.headers.referer) {
+      try {
+        const refererUrl = new URL(req.headers.referer);
+        // Use the origin from referer (includes hostname and port)
+        clientUrl = refererUrl.origin;
+        
+        // If it's a network IP, keep it; otherwise default to localhost:3001
+        if (refererUrl.hostname === 'localhost' || refererUrl.hostname === '127.0.0.1') {
+          clientUrl = 'http://localhost:3001';
+        } else if (refererUrl.hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+          // Network IP detected - use it with port 3001
+          clientUrl = `http://${refererUrl.hostname}:3001`;
+        }
+      } catch (e) {
+        // Invalid referer, use default
+      }
+    }
+    
+    // Pass client URL in OAuth state (Google will return it in callback)
+    const state = Buffer.from(JSON.stringify({ redirect_url: clientUrl })).toString('base64');
+    
+    console.log(`🔗 OAuth initiated from: ${clientUrl}`);
+    
+    passport.authenticate('google', { 
+      scope: ['profile', 'email'],
+      state: state
+    })(req, res, next);
+  }
 );
 
 router.get('/google/callback',
@@ -187,13 +218,43 @@ router.get('/google/callback',
       errorDescription: req.query.error_description
     });
     
-    // Determine correct client URL - always use 3001 for local dev, not 3000 (other project)
-    const getClientUrl = () => {
+    // Determine correct client URL - supports network access
+    const getClientUrl = (req) => {
       // In production, use CLIENT_URL if set
       if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
         return process.env.CLIENT_URL;
       }
-      // For local development, ALWAYS use port 3001 (Weather Analytics project)
+      
+      // Check OAuth state for redirect_url (passed during OAuth initiation)
+      if (req.query.state) {
+        try {
+          const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
+          if (state.redirect_url) {
+            return state.redirect_url;
+          }
+        } catch (e) {
+          // Invalid state, continue
+        }
+      }
+      
+      // Check referer header to detect where user came from
+      if (req.headers.referer) {
+        try {
+          const refererUrl = new URL(req.headers.referer);
+          // If referer is from local network, use that hostname
+          if (refererUrl.hostname !== 'localhost' && refererUrl.hostname !== '127.0.0.1') {
+            // Check if it's a local network IP (192.168.x.x, 10.x.x.x, etc.)
+            const hostname = refererUrl.hostname;
+            if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+              return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+            }
+          }
+        } catch (e) {
+          // Invalid referer, fall through to default
+        }
+      }
+      
+      // Default: use localhost:3001 for local development
       return 'http://localhost:3001';
     };
     
@@ -203,7 +264,7 @@ router.get('/google/callback',
         error: req.query.error,
         description: req.query.error_description
       });
-      const clientUrl = getClientUrl();
+      const clientUrl = getClientUrl(req);
       console.log(`🔀 Redirecting to: ${clientUrl}/login`);
       return res.redirect(`${clientUrl}/login?error=${req.query.error}&description=${encodeURIComponent(req.query.error_description || '')}`);
     }
@@ -211,7 +272,7 @@ router.get('/google/callback',
     // Check if authorization code is missing
     if (!req.query.code) {
       console.error('❌ Missing authorization code in callback');
-      const clientUrl = getClientUrl();
+      const clientUrl = getClientUrl(req);
       console.log(`🔀 Redirecting to: ${clientUrl}/login`);
       return res.redirect(`${clientUrl}/login?error=no_code`);
     }
@@ -224,12 +285,37 @@ router.get('/google/callback',
       session: false,
       failureFlash: false
     },       (err, user, info) => {
-      // Determine correct client URL - always use 3001 for local dev
-      const getClientUrl = () => {
+      // Determine correct client URL - supports network access
+      const getClientUrl = (req) => {
+        // In production, use CLIENT_URL if set
         if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
           return process.env.CLIENT_URL;
         }
-        return 'http://localhost:3001'; // Always use 3001 for Weather Analytics
+        
+        // Check if there's a redirect_url in query params (from OAuth state)
+        if (req.query.redirect_url) {
+          return decodeURIComponent(req.query.redirect_url);
+        }
+        
+        // Check referer header to detect where user came from
+        if (req.headers.referer) {
+          try {
+            const refererUrl = new URL(req.headers.referer);
+            // If referer is from local network, use that hostname
+            if (refererUrl.hostname !== 'localhost' && refererUrl.hostname !== '127.0.0.1') {
+              // Check if it's a local network IP
+              const hostname = refererUrl.hostname;
+              if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+                return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+              }
+            }
+          } catch (e) {
+            // Invalid referer, fall through to default
+          }
+        }
+        
+        // Default: use localhost:3001 for local development
+        return 'http://localhost:3001';
       };
       
       if (err) {
@@ -270,14 +356,14 @@ router.get('/google/callback',
           }
         }
         
-        const clientUrl = getClientUrl();
+        const clientUrl = getClientUrl(req);
         console.log(`🔀 Redirecting to: ${clientUrl}/login (OAuth failed)`);
         return res.redirect(`${clientUrl}/login?error=oauth_failed&message=${encodeURIComponent(err.message || 'Authentication failed')}`);
       }
       
       if (!user) {
         console.error('❌ No user returned from OAuth strategy');
-        const clientUrl = getClientUrl();
+        const clientUrl = getClientUrl(req);
         console.log(`🔀 Redirecting to: ${clientUrl}/login (no user)`);
         return res.redirect(`${clientUrl}/login?error=no_user`);
       }
@@ -288,18 +374,50 @@ router.get('/google/callback',
     })(req, res, next);
   },
   async (req, res) => {
-    // Determine correct client URL - always use 3001 for local dev
-    const getClientUrl = () => {
+    // Determine correct client URL - supports network access
+    const getClientUrl = (req) => {
+      // In production, use CLIENT_URL if set
       if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
         return process.env.CLIENT_URL;
       }
-      return 'http://localhost:3001'; // Always use 3001 for Weather Analytics
+      
+      // Check OAuth state for redirect_url (passed during OAuth initiation)
+      if (req.query.state) {
+        try {
+          const state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
+          if (state.redirect_url) {
+            return state.redirect_url;
+          }
+        } catch (e) {
+          // Invalid state, continue
+        }
+      }
+      
+      // Check referer header to detect where user came from
+      if (req.headers.referer) {
+        try {
+          const refererUrl = new URL(req.headers.referer);
+          // If referer is from local network, use that hostname
+          if (refererUrl.hostname !== 'localhost' && refererUrl.hostname !== '127.0.0.1') {
+            // Check if it's a local network IP
+            const hostname = refererUrl.hostname;
+            if (hostname.match(/^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./)) {
+              return `${refererUrl.protocol}//${hostname}:${refererUrl.port || '3001'}`;
+            }
+          }
+        } catch (e) {
+          // Invalid referer, fall through to default
+        }
+      }
+      
+      // Default: use localhost:3001 for local development
+      return 'http://localhost:3001';
     };
     
     try {
       if (!req.user || !req.user._id) {
         console.error('OAuth callback: No user in request');
-        const clientUrl = getClientUrl();
+        const clientUrl = getClientUrl(req);
         console.log(`🔀 Redirecting to: ${clientUrl}/login (no user in callback)`);
         return res.redirect(`${clientUrl}/login?error=no_user`);
       }
@@ -333,15 +451,15 @@ router.get('/google/callback',
 
       res.cookie('token', token, cookieOptions);
 
-      // Redirect to dashboard - ALWAYS use port 3001 for Weather Analytics
-      const clientUrl = getClientUrl();
+      // Redirect to dashboard - auto-detects network IP if accessed from network
+      const clientUrl = getClientUrl(req);
       console.log(`✅ OAuth successful! Redirecting to: ${clientUrl}/dashboard`);
       res.redirect(`${clientUrl}/dashboard`);
     } catch (error) {
       console.error('OAuth callback error:', error);
       console.error('Error stack:', error.stack);
       
-      const clientUrl = getClientUrl();
+      const clientUrl = getClientUrl(req);
       console.log(`🔀 Redirecting to: ${clientUrl}/login (callback error)`);
       // Redirect with error query parameter for debugging
       res.redirect(`${clientUrl}/login?error=auth_failed`);

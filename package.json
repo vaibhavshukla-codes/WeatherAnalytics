@@ -10,7 +10,8 @@
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "build": "cd client && npm run build"
+    "build": "cd client && npm run build",
+    "network-info": "./get-network-ip.sh"
   },
   "keywords": ["weather", "analytics", "mern", "dashboard"],
   "author": "",

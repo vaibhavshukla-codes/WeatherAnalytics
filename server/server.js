@@ -21,18 +21,47 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:3001', // Primary frontend port (Weather Analytics)
-    process.env.CLIENT_URL || 'http://localhost:3001', // Use 3001 as default
-    // Note: localhost:3000 is intentionally excluded - it's a different project
-    // Add production frontend URL here when deploying
-    ...(process.env.CLIENT_URL && process.env.NODE_ENV === 'production' ? [process.env.CLIENT_URL] : [])
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// CORS configuration - Allow requests from localhost and local network IPs
+const allowedOrigins = [
+  'http://localhost:3001', // Primary frontend port (Weather Analytics)
+  process.env.CLIENT_URL || 'http://localhost:3001'
+];
+
+// In development, allow requests from any local network IP for mobile/other devices
+if (process.env.NODE_ENV !== 'production') {
+  // Allow requests from local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+  app.use(cors({
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      // Check if origin is in allowed list or is a local network IP
+      if (allowedOrigins.includes(origin) ||
+          origin.match(/^http:\/\/192\.168\.\d+\.\d+:\d+$/) ||
+          origin.match(/^http:\/\/10\.\d+\.\d+\.\d+:\d+$/) ||
+          origin.match(/^http:\/\/172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+:\d+$/) ||
+          origin.match(/^http:\/\/localhost:\d+$/)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow all origins in development for network access
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }));
+} else {
+  // Production: only allow specific origins
+  app.use(cors({
+    origin: [
+      ...allowedOrigins,
+      ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : [])
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }));
+}
 app.use(express.json());
 app.use(cookieParser());
 
@@ -182,10 +211,13 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5001;
+const HOST = process.env.HOST || '0.0.0.0'; // Bind to 0.0.0.0 to allow network access
 
 // Start server with error handling
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.log(`🌐 Network access: http://[YOUR_IP]:${PORT}`);
+  console.log(`   (Replace [YOUR_IP] with your machine's IP address)`);
 });
 
 // Handle port already in use error
